@@ -1,0 +1,62 @@
+{
+  "max_open_trades": 5,
+  "stake_currency": "USDT",
+  "stake_amount": "unlimited",
+  "dry_run": true,
+  "dry_run_wallet": 10000,
+  "timeframe": "5m",
+  "exchange": {
+    "name": "binance",
+    "rateLimit": 1200,
+    "ccxt_config": {
+      "enableRateLimit": true
+    },
+    "pair_whitelist": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "BNB/USDT",
+      "SOL/USDT",
+      "ADA/USDT"
+    ]
+  },
+  "pairlists": [
+    {
+      "method": "StaticPairList",
+      "pairs": [
+        "BTC/USDT",
+        "ETH/USDT",
+        "BNB/USDT",
+        "SOL/USDT",
+        "ADA/USDT"
+      ]
+    }
+  ],
+  "protections": [
+    {
+      "method": "CooldownPeriod",
+      "stop_duration_candles": 12
+    },
+    {
+      "method": "StoplossGuard",
+      "lookback_period_candles": 288,
+      "trade_limit": 2,
+      "stop_duration_candles": 288,
+      "only_per_pair": true
+    }
+  ],
+  "fee": 0.001,
+  "enable_order_filled_stoploss": true,
+  "unfilledtimeout": {
+    "buy": 5,
+    "sell": 5
+  },
+  "bid_strategy": {
+    "price_side": "bid",
+    "ask_last_balance": 0.0,
+    "use_order_book": true
+  },
+  "ask_strategy": {
+    "price_side": "ask",
+    "use_order_book": true
+  }
+}

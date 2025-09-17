@@ -9,6 +9,17 @@ user_data/*
 !user_data/notebooks
 !user_data/models
 !user_data/freqaimodels
+!user_data/strategies
+!user_data/strategies/**
+!user_data/features
+!user_data/features/**
+!user_data/scripts
+!user_data/scripts/**
+!user_data/hyperopts
+!user_data/hyperopts/**
+!user_data/rl
+!user_data/rl/**
+!user_data/config.json
 user_data/freqaimodels/*
 user_data/models/*
 user_data/notebooks/*
