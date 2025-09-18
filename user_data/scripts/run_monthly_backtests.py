@@ -1,13 +1,17 @@
 """Run monthly backtests and enforce win-rate/ROI constraints."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
+
+from freqtrade.data.btanalysis.bt_fileutils import load_backtest_data
 
 
 @dataclass
@@ -20,13 +24,29 @@ class MonthResult:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run rolling monthly backtests")
-    parser.add_argument("--strategy", default="EnsembleMetaStrategy", help="Strategy class to backtest")
-    parser.add_argument("--config", type=Path, default=None, help="Optional freqtrade configuration file")
+    parser.add_argument(
+        "--strategy", default="EnsembleMetaStrategy", help="Strategy class to backtest"
+    )
+    parser.add_argument(
+        "--config", type=Path, default=None, help="Optional freqtrade configuration file"
+    )
     parser.add_argument("--start", default="2024-01", help="First month (YYYY-MM)")
     parser.add_argument("--end", default="2025-06", help="Last month (YYYY-MM)")
-    parser.add_argument("--min-winrate", type=float, default=0.80, help="Minimum acceptable win-rate per month")
-    parser.add_argument("--output-dir", type=Path, default=Path("user_data/backtest_results/monthly"))
-    parser.add_argument("--trade-export", default="trades", choices=["trades"], help="Type of export to generate")
+    parser.add_argument(
+        "--min-winrate", type=float, default=0.80, help="Minimum acceptable win-rate per month"
+    )
+    parser.add_argument(
+        "--min-roi",
+        type=float,
+        default=0.10,
+        help="Minimum acceptable cumulative ROI (as a fraction) per month",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("user_data/backtest_results/monthly")
+    )
+    parser.add_argument(
+        "--trade-export", default="trades", choices=["trades"], help="Type of export to generate"
+    )
     parser.add_argument(
         "--timerange-buffer",
         type=int,
@@ -51,6 +71,8 @@ def run_backtest(period: pd.Period, args: argparse.Namespace, export_path: Path)
         args.strategy,
         "--timerange",
         timerange,
+        "--export-directory",
+        str(args.output_dir),
         "--export",
         args.trade_export,
         "--export-filename",
@@ -62,10 +84,23 @@ def run_backtest(period: pd.Period, args: argparse.Namespace, export_path: Path)
     print(f"Running backtest for {period} ({timerange})")
     subprocess.run(cmd, check=True)
 
-    if not export_path.exists():
-        raise RuntimeError(f"Expected export not found: {export_path}")
-
-    trades = pd.read_json(export_path)
+    trades: pd.DataFrame
+    if export_path.exists():
+        trades = pd.read_json(export_path)
+    else:
+        time.sleep(0.5)
+        candidates = sorted(
+            args.output_dir.glob("backtest-result-*.zip"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            raise RuntimeError(f"Expected export not found: {export_path}")
+        latest = candidates[0]
+        trades = load_backtest_data(latest, strategy=args.strategy)
+        if trades.empty:
+            raise RuntimeError(f"No trades found in backtest export {latest}")
+        trades.to_json(export_path, orient="records", date_format="iso")
     if trades.empty:
         return MonthResult(period=str(period), trades=0, winrate=0.0, roi=0.0)
 
@@ -92,17 +127,17 @@ def main() -> None:
     for period in months:
         export_path = args.output_dir / f"trades_{period}.json"
         result = run_backtest(period, args, export_path)
-        print(
-            f"{period}: trades={result.trades} winrate={result.winrate:.3f} roi={result.roi:.4f}"
-        )
+        print(f"{period}: trades={result.trades} winrate={result.winrate:.3f} roi={result.roi:.4f}")
         if result.trades == 0:
             raise RuntimeError(f"No trades generated for period {period}")
         if result.winrate < args.min_winrate:
             raise RuntimeError(
                 f"Win-rate {result.winrate:.3f} below threshold {args.min_winrate:.2f} for {period}"
             )
-        if result.roi <= 0:
-            raise RuntimeError(f"Non-positive ROI {result.roi:.4f} detected for {period}")
+        if result.roi < args.min_roi:
+            raise RuntimeError(
+                f"ROI {result.roi:.4f} below threshold {args.min_roi:.2f} for {period}"
+            )
         results.append(result)
 
     summary_path = args.output_dir / "monthly_summary.json"

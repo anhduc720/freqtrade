@@ -31,31 +31,20 @@
       ]
     }
   ],
-  "protections": [
-    {
-      "method": "CooldownPeriod",
-      "stop_duration_candles": 12
-    },
-    {
-      "method": "StoplossGuard",
-      "lookback_period_candles": 288,
-      "trade_limit": 2,
-      "stop_duration_candles": 288,
-      "only_per_pair": true
-    }
-  ],
   "fee": 0.001,
   "enable_order_filled_stoploss": true,
   "unfilledtimeout": {
-    "buy": 5,
-    "sell": 5
+    "entry": 5,
+    "exit": 5,
+    "exit_timeout_count": 0,
+    "unit": "minutes"
   },
-  "bid_strategy": {
+  "entry_pricing": {
     "price_side": "bid",
-    "ask_last_balance": 0.0,
+    "price_last_balance": 0.0,
     "use_order_book": true
   },
-  "ask_strategy": {
+  "exit_pricing": {
     "price_side": "ask",
     "use_order_book": true
   }

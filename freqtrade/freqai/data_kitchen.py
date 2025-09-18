@@ -441,9 +441,27 @@ class FreqaiDataKitchen:
         for extra_col in self.data["extra_returns_per_train"]:
             append_df[f"{extra_col}"] = self.data["extra_returns_per_train"][extra_col]
 
-        append_df["do_predict"] = do_predict
-        if self.freqai_config["feature_parameters"].get("DI_threshold", 0) > 0:
-            append_df["DI_values"] = self.DI_values
+        len_preds = len(append_df)
+        len_backtest = len(dataframe_backtest)
+
+        if len_preds != len_backtest:
+            logger.warning(
+                "Prediction/backtest length mismatch (pred=%s, backtest=%s). Adjusting to align.",
+                len_preds,
+                len_backtest,
+            )
+            if len_preds > len_backtest and len_backtest > 0:
+                trim = len_backtest
+                append_df = append_df.tail(trim).reset_index(drop=True)
+                do_predict = do_predict[-trim:]
+                len_preds = trim
+            elif len_preds < len_backtest and len_preds > 0:
+                dataframe_backtest = dataframe_backtest.tail(len_preds).copy()
+                len_backtest = len_preds
+
+        append_df["do_predict"] = do_predict[:len_preds]
+        if self.freqai_config["feature_parameters"].get("DI_threshold", 0) > 0 and len_preds:
+            append_df["DI_values"] = self.DI_values[-len_preds:]
 
         user_cols = [col for col in dataframe_backtest.columns if col.startswith("%%")]
         cols = ["date"]

@@ -141,11 +141,13 @@ python user_data/scripts/run_monthly_backtests.py \
   --config user_data/config.json \
   --start 2024-01 \
   --end 2025-06 \
-  --min-winrate 0.80
+  --min-winrate 0.80 \
+  --min-roi 0.10
 ```
 
 Successful runs create JSON exports per month and a
 `user_data/backtest_results/monthly/monthly_summary.json` file with the metrics.
+Adjust `--min-roi` if you want a stricter or looser profitability target.
 
 ## 9. Optional: RL overlay for position sizing
 

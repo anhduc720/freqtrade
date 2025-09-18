@@ -1,4 +1,5 @@
 """Ensemble strategy combining mean-reversion and breakout signals with meta-labelling."""
+
 from __future__ import annotations
 
 import pickle
@@ -9,8 +10,8 @@ import numpy as np
 import pandas as pd
 from freqtrade.strategy import IStrategy
 
-from .strat_breakout_tf import StratBreakoutTF
-from .strat_scalper_mr import StratScalperMR
+from strat_breakout_tf import StratBreakoutTF
+from strat_scalper_mr import StratScalperMR
 
 
 class EnsembleMetaStrategy(IStrategy):
@@ -19,8 +20,11 @@ class EnsembleMetaStrategy(IStrategy):
     can_short = False
     startup_candle_count = 400
 
+    stoploss: float = -0.015
+    minimal_roi: Dict[str, float] = {"0": 0.03, "120": 0.02, "240": 0.01}
+
     # Meta-model configuration.
-    p_threshold: float = 0.65
+    p_threshold: float = 0.50
     model_path = Path("user_data/models/meta_label_xgb.pkl")
     scaler_path = Path("user_data/models/scaler.pkl")
 
@@ -63,8 +67,18 @@ class EnsembleMetaStrategy(IStrategy):
             dataframe = dataframe.join(informative[["slope_1h"]], how="left")
         dataframe["slope_1h"].fillna(0.0, inplace=True)
 
-        dataframe["hour"] = dataframe.index.hour
-        dataframe["weekday"] = dataframe.index.weekday
+        if isinstance(dataframe.index, pd.DatetimeIndex):
+            dt_series = pd.Series(dataframe.index, index=dataframe.index)
+        elif "date" in dataframe.columns:
+            dt_series = pd.to_datetime(dataframe["date"], utc=True, errors="coerce")
+        else:
+            dt_series = pd.Series(
+                pd.to_datetime(dataframe.index, utc=True, errors="coerce"),
+                index=dataframe.index,
+            )
+
+        dataframe["hour"] = dt_series.dt.hour
+        dataframe["weekday"] = dt_series.dt.weekday
         return dataframe
 
     def _collect_features(self, row: pd.Series) -> np.ndarray:
@@ -85,12 +99,11 @@ class EnsembleMetaStrategy(IStrategy):
             features = self.scaler.transform(features)
         return features
 
-    def _ml_pass(self, row: pd.Series) -> bool:
+    def _ml_proba(self, row: pd.Series) -> Optional[float]:
         if self.model is None:
-            return True
+            return None
         proba = float(self.model.predict_proba(self._collect_features(row))[:, 1][0])
-        row["meta_proba"] = proba
-        return proba >= self.p_threshold
+        return proba
 
     def populate_buy_trend(self, dataframe: pd.DataFrame, metadata: Dict) -> pd.DataFrame:
         dataframe["buy"] = 0
@@ -101,8 +114,13 @@ class EnsembleMetaStrategy(IStrategy):
 
         for idx in candidate_index:
             row = dataframe.loc[idx]
-            if self._ml_pass(row):
-                dataframe.at[idx, "buy"] = 1
+            proba = self._ml_proba(row)
+            if proba is not None and proba < self.p_threshold:
+                continue
+
+            dataframe.at[idx, "buy"] = 1
+            if proba is not None:
+                dataframe.at[idx, "enter_tag"] = f"meta_{proba:.3f}"
 
         return dataframe
 
@@ -110,18 +128,16 @@ class EnsembleMetaStrategy(IStrategy):
         dataframe["sell"] = 0
         return dataframe
 
-    @staticmethod
-    def order_types() -> Dict[str, str]:
-        return {
-            "buy": "limit",
-            "sell": "limit",
-            "stoploss": "market",
-            "stoploss_on_exchange": "market",
-        }
+    order_types: Dict[str, object] = {
+        "entry": "limit",
+        "exit": "limit",
+        "stoploss": "market",
+        "stoploss_on_exchange": False,
+    }
 
     def protections(self) -> Optional[List[dict]]:
         try:
-            from .protections_config import get_protections
+            from protections_config import get_protections
 
             return get_protections()
         except ImportError:

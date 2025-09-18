@@ -1,17 +1,18 @@
 """Utility script to build meta-labelling features from backtest trades."""
+
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 import numpy as np
 import pandas as pd
 import talib as ta
-from freqtrade.data.btanalysis import load_trades
+from freqtrade.data.btanalysis.bt_fileutils import load_backtest_data
 from freqtrade.data.history import load_pair_history
 from freqtrade.enums import CandleType
-from freqtrade.misc import timeframe_to_minutes
+from freqtrade.exchange import timeframe_to_minutes
 
 BASE_COLUMNS = [
     "pair",
@@ -74,13 +75,19 @@ def enrich_with_time_features(dataframe: pd.DataFrame) -> pd.DataFrame:
     return enriched
 
 
-def load_price_frame(pair: str, timeframe: str, data_dir: Path, candle_type: CandleType) -> pd.DataFrame:
+def load_price_frame(
+    pair: str,
+    timeframe: str,
+    data_dir: Path,
+    candle_type: CandleType,
+    data_format: Optional[str],
+) -> pd.DataFrame:
     frame = load_pair_history(
         pair=pair,
         timeframe=timeframe,
         datadir=data_dir,
         timerange=None,
-        data_format=None,
+        data_format=data_format,
         candle_type=candle_type,
     )
     frame = frame.copy()
@@ -95,12 +102,13 @@ def build_feature_frame(
     informative_timeframes: Iterable[str],
     data_dir: Path,
     candle_type: CandleType,
+    data_format: Optional[str],
 ) -> pd.DataFrame:
-    base = load_price_frame(pair, base_timeframe, data_dir, candle_type)
+    base = load_price_frame(pair, base_timeframe, data_dir, candle_type, data_format)
     features = enrich_with_time_features(compute_mr_features(base).join(base[["close"]]))
 
     for tf in informative_timeframes:
-        informative = load_price_frame(pair, tf, data_dir, candle_type)
+        informative = load_price_frame(pair, tf, data_dir, candle_type, data_format)
         if timeframe_to_minutes(base_timeframe) < timeframe_to_minutes(tf):
             informative = informative.reindex(features.index, method="ffill")
         if tf.endswith("m"):
@@ -111,6 +119,8 @@ def build_feature_frame(
         features = features.join(sub_features.add_suffix(suffix), how="left")
 
     features["pair"] = pair
+    if "slope_1h_1h" in features.columns:
+        features.rename(columns={"slope_1h_1h": "slope_1h"}, inplace=True)
     features.fillna(0.0, inplace=True)
     return features
 
@@ -153,8 +163,15 @@ def merge_trades_with_features(
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build ML features for meta-labelling.")
-    parser.add_argument("--trades", type=Path, required=True, help="Path to exported trades JSON file")
-    parser.add_argument("--data-dir", type=Path, default=Path("user_data/data"), help="Directory with cached OHLCV data")
+    parser.add_argument(
+        "--trades", type=Path, required=True, help="Path to exported trades JSON file"
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("user_data/data/binance"),
+        help="Directory containing exchange-specific OHLCV data",
+    )
     parser.add_argument("--base-timeframe", default="5m", help="Base strategy timeframe")
     parser.add_argument(
         "--informative-timeframes",
@@ -174,18 +191,18 @@ def parse_arguments() -> argparse.Namespace:
         choices=["spot", "futures"],
         help="Type of candles to load",
     )
+    parser.add_argument(
+        "--data-format",
+        default="feather",
+        choices=["json", "jsongz", "feather", "parquet"],
+        help="OHLCV data format to load",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_arguments()
-    trades = load_trades(
-        source="file",
-        db_url="",
-        exportfilename=args.trades,
-        no_trades=False,
-        strategy=None,
-    )
+    trades = load_backtest_data(args.trades)
     if trades.empty:
         raise SystemExit("No trades found in export file")
 
@@ -203,6 +220,7 @@ def main() -> None:
             args.informative_timeframes,
             args.data_dir,
             candle_type,
+            args.data_format,
         )
         for pair in pairs
     }

@@ -1,4 +1,5 @@
 """Train calibrated meta-label model for EnsembleMetaStrategy."""
+
 from __future__ import annotations
 
 import argparse
@@ -50,6 +51,12 @@ def parse_arguments() -> argparse.Namespace:
         default=5,
         help="Number of time-series splits for calibration",
     )
+    parser.add_argument(
+        "--min-profit",
+        type=float,
+        default=0.0,
+        help="Minimum profit ratio considered a positive label",
+    )
     return parser.parse_args()
 
 
@@ -62,12 +69,15 @@ def load_dataset(path: Path) -> pd.DataFrame:
     return df
 
 
-def prepare_features(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, RobustScaler]:
+def prepare_features(
+    df: pd.DataFrame, min_profit: float
+) -> tuple[np.ndarray, np.ndarray, RobustScaler]:
     missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
     if missing:
         raise SystemExit(f"Missing required features: {', '.join(missing)}")
     X = df[FEATURE_COLUMNS].fillna(0.0).to_numpy(dtype=np.float32)
-    y = df["label"].to_numpy(dtype=np.int8)
+    profit = df["profit_ratio"].astype(float)
+    y = (profit >= min_profit).astype(np.int8)
 
     scaler = RobustScaler()
     X_scaled = scaler.fit_transform(X)
@@ -86,6 +96,7 @@ def train_model(X: np.ndarray, y: np.ndarray, splits: int) -> CalibratedClassifi
         eval_metric="logloss",
         tree_method="hist",
         n_jobs=-1,
+        base_score=0.5,
     )
 
     splitter = TimeSeriesSplit(n_splits=splits)
@@ -101,7 +112,7 @@ def train_model(X: np.ndarray, y: np.ndarray, splits: int) -> CalibratedClassifi
 def main() -> None:
     args = parse_arguments()
     dataset = load_dataset(args.features)
-    X, y, scaler = prepare_features(dataset)
+    X, y, scaler = prepare_features(dataset, args.min_profit)
 
     model = train_model(X, y, args.cv_splits)
     preds = model.predict(X)
