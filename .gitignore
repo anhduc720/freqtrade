@@ -20,6 +20,7 @@ user_data/*
 !user_data/rl
 !user_data/rl/**
 !user_data/config.json
+!user_data/README.md
 user_data/freqaimodels/*
 user_data/models/*
 user_data/notebooks/*
